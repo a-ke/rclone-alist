@@ -77,6 +77,8 @@ MAIL_BIN = "/usr/sbin/sendmail"
 # --- Telegram 配置 ---
 TG_BOT_TOKEN = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 TG_CHAT_ID = "123456789"
+# === 代理配置  ===
+PROXY_URL = "http://192.168.1.1:7890"
 
 # ================= rclone 参数（列表形式） =================
 RCLONE_OPTS = [
@@ -160,8 +162,24 @@ def notify(message):
     """发送通知"""
     if ENABLE_NOTIFY != "on":
         return
-
-    logging.info("发送通知...")
+    
+    # 构造 proxies 字典 (如果配置了全局代理)
+    proxies = None
+    try:
+        # 检查 PROXY_URL 是否已定义、非空且不只包含空格
+        if PROXY_URL and PROXY_URL.strip():
+            # .strip() 用于去除首尾可能存在的空格
+            effective_proxy_url = PROXY_URL.strip()
+            proxies = {
+               'http': effective_proxy_url,
+               'https': effective_proxy_url,
+            }
+            logging.info(f"检测到代理配置，将通过 {effective_proxy_url} 发送通知。")
+            
+    except NameError:
+        # 如果 PROXY_URL 变量未定义 (被删除或注释)，则静默处理，proxies 保持为 None
+        # 脚本将继续尝试直接连接
+        pass
     try:
         if NOTIFY_MODE == "mail":
             msg = f"Subject: {MAIL_SUBJECT}\n\n{message}"
@@ -170,7 +188,7 @@ def notify(message):
         elif NOTIFY_MODE == "telegram":
             url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
             payload = {'chat_id': TG_CHAT_ID, 'text': message}
-            requests.post(url, data=payload, timeout=10)
+            requests.post(url, params=payload, timeout=10, proxies=proxies)
         logging.info("通知发送成功。")
     except Exception as e:
         logging.error(f"通知发送失败: {e}")
