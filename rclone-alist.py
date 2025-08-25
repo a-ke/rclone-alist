@@ -183,40 +183,62 @@ def get_local_files(local_dir):
     """
     local_files = {}
     
+    # 为了统一匹配，将EXCLUDES中的Windows路径分隔符替换为/
+    normalized_excludes = [p.replace('\\', '/') for p in EXCLUDES]
+
     for root, dirs, files in os.walk(local_dir, topdown=True):
         # --- 目录排除 (Pruning) ---
         # 遍历目录列表的副本，因为我们会在循环中修改它
         for d in list(dirs):
             is_excluded = False
-            # 将目录名与忽略规则进行匹配
-            rel_dir_path = os.path.join(os.path.relpath(root, local_dir), d) if root != local_dir else d
-            for pattern in EXCLUDES:
-                # 匹配 'node_modules/**', 'tmp/' 这类目录规则
-                if fnmatch.fnmatch(rel_dir_path, pattern) or \
-                   fnmatch.fnmatch(rel_dir_path + '/', pattern):
+            # 构造相对路径并统一使用 / 分隔符，以便与规则匹配
+            rel_dir_path = os.path.relpath(os.path.join(root, d), local_dir).replace('\\', '/')
+
+            for pattern in normalized_excludes:
+                # 核心修正：
+                # 1. 处理 'foo/**' 模式，使其能匹配 'foo' 目录本身。
+                # 2. 处理 'foo/' 模式，使其能匹配 'foo' 目录本身。
+                # 3. 标准匹配。
+                base_pattern = pattern
+                if pattern.endswith('/**'):
+                    base_pattern = pattern[:-3] # 从 '@eaDir/**' 得到 '@eaDir'
+                elif pattern.endswith('/'):
+                    base_pattern = pattern[:-1] # 从 'tmp/' 得到 'tmp'
+                
+                if fnmatch.fnmatch(rel_dir_path, base_pattern) or fnmatch.fnmatch(rel_dir_path, pattern):
                     is_excluded = True
                     break
+
             if is_excluded:
-                dirs.remove(d) # 从遍历中移除此目录
+                # 从os.walk的后续遍历中移除此目录及其所有子目录
+                dirs.remove(d) 
 
         # --- 文件排除 ---
         for file in files:
             full_path = os.path.join(root, file)
-            rel_path = os.path.relpath(full_path, local_dir)
-            basename = os.path.basename(rel_path)
+            # 构造相对路径并统一使用 / 分隔符
+            rel_path = os.path.relpath(full_path, local_dir).replace('\\', '/')
             
             is_excluded = False
-            for pattern in EXCLUDES:
-                # 检查规则是否匹配相对路径，或者（如果规则不含路径分隔符）是否匹配文件名
-                if fnmatch.fnmatch(rel_path, pattern) or ('/' not in pattern and fnmatch.fnmatch(basename, pattern)):
+            for pattern in normalized_excludes:
+                # 检查规则是否匹配相对路径
+                if fnmatch.fnmatch(rel_path, pattern):
                     is_excluded = True
                     break
+                
+                # 如果规则不包含路径分隔符，则额外检查是否匹配文件名
+                # 例如规则是 "*.log"，可以匹配 "path/to/backup.log"
+                if '/' not in pattern and fnmatch.fnmatch(os.path.basename(rel_path), pattern):
+                    is_excluded = True
+                    break
+
             if is_excluded:
                 continue
             
             # 如果文件未被忽略，则获取其信息
             try:
                 stat = os.stat(full_path)
+                # 统一使用 rel_path (它已经处理了路径分隔符)
                 info_str = f"{stat.st_size}|{stat.st_mtime}"
                 local_files[rel_path] = info_str
             except FileNotFoundError:
